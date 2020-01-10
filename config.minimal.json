@@ -1,0 +1,14 @@
+{
+	"server":
+	{
+		"hostname": "localhost"
+	},
+	"logging":
+	{
+		"verbosity": 4
+	},
+	"bindings":
+	[
+		"tcp://localhost:6667"
+	]
+}
