@@ -377,7 +377,7 @@ class Client:
             elif fields[0] == "wl" and self.__state.joining:
                 self.__state.add_member(fields[2], "%s@%s" % (fields[6], fields[7]))
 
-class ParserState(Enum):
+class StatusParserState(Enum):
     WAITING = 0
     STARTED = 1
     READ_INVITATIONS = 2
@@ -386,8 +386,7 @@ class ParserState(Enum):
 
 class StatusParser:
     def __init__(self):
-        self.__state = ParserState.WAITING
-        self.__is_address = False
+        self.__state = StatusParserState.WAITING
 
     def feed(self, t, fields):
         again = True
@@ -395,29 +394,29 @@ class StatusParser:
         while again:
             again = False
 
-            if self.__state != ParserState.COMPLETED:
-                if self.__state == ParserState.WAITING:
+            if self.__state != StatusParserState.COMPLETED:
+                if self.__state == StatusParserState.WAITING:
                     if t == "i" and len(fields) == 2 and fields[0] == "co":
                         m = re.match(r"^Name: (\w+) Mod: .*", fields[1])
 
                         if m:
-                            self.__state = ParserState.STARTED
+                            self.__state = StatusParserState.STARTED
 
                             self.begin(m.group(1))
                 else:
                     if t != "i" or len(fields) != 2 or fields[0] != "co":
                         self.end()
-                        self.__state = ParserState.COMPLETED
+                        self.__state = StatusParserState.COMPLETED
                     else:
                         again = self.__read_line__(fields[1])
 
-        return self.__state != ParserState.COMPLETED
+        return self.__state != StatusParserState.COMPLETED
 
     def __read_line__(self, line):
         again = False
 
         if line.startswith("Nicks invited") or line.startswith("Addresses invited"):
-            self.__state = ParserState.READ_INVITATIONS
+            self.__state = StatusParserState.READ_INVITATIONS
 
             if line.startswith("Nicks"):
                 self.__is_address = False
@@ -428,7 +427,7 @@ class StatusParser:
 
             self.__read_invitations__(line.strip(": "))
         elif line.startswith("Talkers") or line.startswith("Talkers (addresses)"):
-            self.__state = ParserState.READ_TALKERS
+            self.__state = StatusParserState.READ_TALKERS
 
             if line.startswith("Talkers ("):
                 self.__is_address = True
@@ -442,11 +441,11 @@ class StatusParser:
             if line.startswith("Name:"):
                 self.end()
 
-                self.__state = ParserState.WAITING
+                self.__state = StatusParserState.WAITING
                 again = True
-            elif self.__state == ParserState.READ_INVITATIONS:
+            elif self.__state == StatusParserState.READ_INVITATIONS:
                 self.__read_invitations__(line)
-            elif self.__state == ParserState.READ_TALKERS:
+            elif self.__state == StatusParserState.READ_TALKERS:
                 self.__read_talkers(line)
 
         return again
@@ -472,4 +471,68 @@ class StatusParser:
         pass
 
     def stop(self):
-        self.__state = ParserState.COMPLETED
+        self.__state = StatusParserState.COMPLETED
+
+class ListParserState(Enum):
+    WAITING = 0
+    READING = 1
+    COMPLETED = 2
+
+class ListParser:
+    def __init__(self):
+        self.__state = ListParserState.WAITING
+
+    def feed(self, t, fields):
+        if self.__state == ListParserState.WAITING or self.__state == ListParserState.READING:
+            if t == "i" and len(fields) >= 2:
+                if fields[0] == "co":
+                    m = re.match("Group: ([^\s\.]+)\s+\((\w{3})\) Mod: ([^\s\.]+)\s+Topic: (.*)", fields[1])
+
+                    if m:
+                        if self.__state == ListParserState.READING:
+                            self.end()
+
+                        self.begin(m.group(1), m.group(2), m.group(3) if m.group(3) != "(None)" else None, m.group(4) if m.group(4) != "(None)" else None)
+
+                        self.__state = ListParserState.READING
+                    elif fields[1].startswith("Total:"):
+                        self.end()
+                elif fields[0] == "wl" and len(fields) >= 9 and self.__state == ListParserState.READING:
+                    is_mod = fields[1] != " "
+                    nick, idle, loginid, host, status = fields[2], int(fields[3]), fields[6], fields[7], fields[8]
+
+                    self.found_user(is_mod, nick, idle, loginid, host, status)
+            elif self.__state == ListParserState.READING:
+                self.__state = ListParserState.COMPLETED
+
+        return self.__state != ListParserState.COMPLETED
+
+    def begin(self, group, status, moderator, topic):
+        pass
+
+    def end(self):
+        pass
+
+    def found_user(self, is_mod, nick, idle, loginid, host, status):
+        pass
+
+    def stop(self):
+        self.__state = ListParserState.COMPLETED
+        self.end()
+
+class AwayParser:
+    def __init__(self):
+            self.__waiting = True
+
+            self.on_away_found = lambda msg: None
+
+    def feed(self, t, fields):
+        if self.__waiting:
+            if t == "d" and len(fields) >= 2 and fields[0] == "Away":
+                self.__waiting = False
+
+                offset = fields[1].rfind("(")
+
+                self.on_away_found(fields[1][0:offset - 1:])
+
+        return self.__waiting

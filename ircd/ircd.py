@@ -45,6 +45,7 @@ import url
 import client
 import ltd
 import validate
+import timer
 
 @dataclass
 class Session:
@@ -85,6 +86,28 @@ class ListFromStatus(client.StatusParser):
         if self.__found_group == self.__group:
             self.stop()
 
+class FindUser(client.ListParser):
+    def __init__(self, nick):
+        super().__init__()
+
+        self.__nick = nick
+        self.__args = None
+
+        self.on_found = lambda is_mod, nick, idle, loginid, host, status: None
+        self.on_not_found = lambda: None
+
+    def found_user(self, is_mod, nick, idle, loginid, host, status):
+        if nick == self.__nick:
+            self.__args = (is_mod, nick, idle, loginid, host, status)
+
+            self.stop()
+
+    def end(self):
+        if self.__args:
+            self.on_found(*self.__args)
+        else:
+            self.on_not_found()
+
 class IRCServerProtocol(asyncio.Protocol, client.StateListener):
     def __init__(self, config, log, connections, icb_host="127.0.0.1", icb_port=7326):
         asyncio.Protocol.__init__(self)
@@ -101,6 +124,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         self.__decoder = irc.Decoder()
         self.__shutdown = False
         self.__handlers = []
+        self.__away_cache = {}
 
         self.__decoder.add_listener(self.__on_message__)
 
@@ -294,8 +318,64 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         if new:
             self.__writeln__(":%s MODE #%s +o %s", self.__config.server_hostname, self.__client.state.group, new)
 
+    def __who_received__(self, params):
+        for p in params:
+            if p != "o":
+                self.__writeln__(":%s 315 %s %s :End of WHO list", self.__config.server_hostname, self.__session.nick, p)
+
     def __whois_received__(self, params):
-        self.__writeln__(":%s 318 %s :End of WHOIS list", self.__config.server_hostname, self.__session.nick)
+        if len(params) > 0:
+            p = FindUser(params[0])
+
+            p.on_found = self.__send_whois__
+            p.on_not_found = lambda: self.__writeln__(":%s 401 %s %s :No such nick.", self.__config.server_hostname, self.__session.nick, params[0])
+
+            self.__handlers.append(p)
+
+            self.__client.command("w")
+
+    def __send_whois__(self, is_mod, nick, idle, loginid, host, status):
+        self.__writeln__(":%s 311 %s %s %s %s * :%s", self.__config.server_hostname, self.__session.nick, nick, loginid, host, loginid)
+        self.__writeln__(":%s 312 %s %s %s :ICB Proxy", self.__config.server_hostname, self.__session.nick, nick, self.__config.server_hostname)
+
+        if is_mod:
+            self.__writeln__(":%s 313 %s %s :Moderator", self.__config.server_hostname, self.__session.nick, nick)
+
+        self.__writeln__(":%s 317 %s %s %d :seconds idle", self.__config.server_hostname, self.__session.nick, nick, idle)
+
+        if "aw" in status:
+            text = None
+
+            if nick in self.__away_cache:
+                m = self.__away_cache[nick]
+
+                if m["timer"].elapsed() <= 120:
+                    text = m["text"]
+                else:
+                    del self.__away_cache[nick]
+
+            if text:
+                self.__end_of_whois__(nick, text)
+            else:
+                p = client.AwayParser()
+
+                p.on_away_found = lambda text: self.__end_of_whois__(nick, away_message=text, update_cache=True)
+
+                self.__handlers.append(p)
+
+                self.__client.command("beep", nick)
+                self.__client.ping()
+        else:
+            self.__end_of_whois__(nick)
+
+    def __end_of_whois__(self, nick, away_message=None, update_cache=False):
+        if away_message:
+            self.__writeln__(":%s 301 %s %s :%s", nick, self.__config.server_hostname, nick, away_message)
+
+            if update_cache:
+                self.__away_cache[nick] = {"timer": timer.Timer(), "text": away_message}
+
+        self.__writeln__(":%s 318 %s %s: End of WHOIS", self.__config.server_hostname, self.__session.nick, nick)
 
     def __join_received__(self, params):
         if len(params) != 1:
