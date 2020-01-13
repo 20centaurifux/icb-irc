@@ -209,23 +209,39 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         self.__writeln__("PONG %s", self.__config.server_hostname)
 
     def __mode_received__(self, params):
-        if params[0].startswith("#") and self.__client.state.group_status:
-            self.__channel_mode__(params[0][1:], params[1:])
+        if len(params) >= 1:
+            if params[0].startswith("#"):
+                self.__channel_mode__(params[0][1:], params[1:])
+            else:
+                self.__user_mode__(params[0], params[1:])
         else:
-            self.__writeln__(":%s 501 %s", self.__config.server_hostname, self.__session.nick)
+            self.__writeln__(":%s 462 %s mode :Not enough Parameters.", self.__config.server_hostname, self.__session.nick)
 
     def __channel_mode__(self, channel, params):
-        if not params:
-            self.__send_channel_mode__()
-        elif len(params) == 1:
-            q = params[0]
+        if channel == self.__client.state.group:
+            if not params:
+                self.__send_channel_mode__()
+            elif len(params) == 1:
+                q = params[0]
 
-            if q == "+b":
-                self.__send_bans__()
-            elif q == "+e":
-                self.__send_exceptions__()
-            elif q == "+I":
-                self.__send_invitations__()
+                if q == "+b":
+                    self.__send_bans__()
+                elif q == "+e":
+                    self.__send_exceptions__()
+                elif q == "+I":
+                    self.__send_invitations__()
+                else:
+                    self.__writeln__(":%s 482 #%s :Cannot change mode over IRC protocol.", self.__config.server_hostname, channel)
+        else:
+            self.__writeln__(":%s 441 %s #%s :You're not in this channel.", self.__config.server_hostname, self.__session.nick, channel)
+
+    def __user_mode__(self, user, params):
+        if user == self.__session.nick:
+            self.__writeln__(":%s 221 %s +i", self.__config.server_hostname, self.__session.nick)
+        elif params:
+            self.__writeln__(":%s 502 %s :Cannot change mode for other users.", self.__config.server_hostname, self.__session.nick)
+        else:
+            self.__writeln__(":%s 221 %s +i", self.__config.server_hostname, user)
 
     def __send_channel_mode__(self):
         flags = self.__map_group_status__(self.__client.state.group_status)
@@ -388,9 +404,9 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
             self.__log.warning(traceback.format_exc())
 
     def __welcome__(self):
-        self.__writeln__("001 %s :Welcome to the Internet Relay Network %s.", self.__session.nick, self.__session.nick)
-        self.__writeln__("002 %s :Your host is %s, running version v%s.", self.__session.nick, self.__config.server_hostname, core.VERSION)
-        self.__writeln__("004 %s :%s v%s oi npstimq" , self.__session.nick, core.NAME, core.VERSION)
+        self.__writeln__(":%s 001 %s :Welcome to the Internet Relay Network %s.", self.__config.server_hostname, self.__session.nick, self.__session.nick)
+        self.__writeln__(":%s 002 %s :Your host is %s, running version v%s.", self.__config.server_hostname, self.__session.nick, self.__config.server_hostname, core.VERSION)
+        self.__writeln__(":%s 004 %s :%s v%s oi npstiqC", self.__config.server_hostname, self.__session.nick, core.NAME, core.VERSION)
         self.__writeln__(":%s 375 %s :Message of the Day", self.__config.server_hostname, self.__session.nick)
         self.__writeln__(":%s 376 %s :End of MOTD", self.__config.server_hostname, self.__session.nick)
         self.__writeln__(":%s 221 %s +i", self.__config.server_hostname, self.__session.nick)
@@ -460,7 +476,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         elif not self.__client.state.joining:
             if name == "topic":
                 self.__topic_changed__(new)
-            elif name == "nick":
+            elif name == "nick" and old:
                 self.__nick__changed__(new)
             elif name == "group_status":
                 self.__channel_mode_changed__(old, new)
