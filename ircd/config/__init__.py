@@ -31,12 +31,9 @@ import core
 @dataclass
 class Config:
     server_hostname: str = "localhost"
-    server_max_logins: int = 500
     bindings: List[str] = field(default_factory=list)
     logging_verbosity: core.Verbosity = core.Verbosity.INFO
-    timeouts_connection: int = 120
-    timeouts_ping: int = 45
-    timeouts_time_between_messages: float = 0.5
+    icb_endpoint: str = "tcp://localhost:7326"
 
 def transform_map(m):
     m = copy.deepcopy(m)

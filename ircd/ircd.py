@@ -57,7 +57,7 @@ class Session:
     def clientid(self):
         return "%s!~%s@%s" % (self.nick, self.loginid, self.host)
 
-class ListFromStatus(client.StatusParser):
+class MembersFromStatus(client.StatusParser):
     def __init__(self, group, list_type):
         super().__init__()
 
@@ -109,15 +109,17 @@ class FindUser(client.ListParser):
             self.on_not_found()
 
 class IRCServerProtocol(asyncio.Protocol, client.StateListener):
-    def __init__(self, config, log, connections, icb_host="127.0.0.1", icb_port=7326):
+    def __init__(self, config, log, connections):
         asyncio.Protocol.__init__(self)
         client.StateListener.__init__(self)
+
+        binding = url.parse_server_address(config.icb_endpoint)
 
         self.__config = config
         self.__log = log
         self.__connections = connections
-        self.__icb_host = icb_host
-        self.__icb_port = icb_port
+        self.__icb_host = binding["address"]
+        self.__icb_port = binding["port"]
         self.__session_id = token_hex(20)
         self.__session = Session()
         self.__client = None
@@ -132,6 +134,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         address = transport.get_extra_info("peername")
 
         self.__log.info("Client connected, session_id=%s, address=%s", self.__session_id, address[0])
+        self.__log.debug("ICB endpoint: %s", self.__config.icb_endpoint)
 
         self.__connections[self.__session_id] = address
         self.__address = address[0]
@@ -182,7 +185,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         receive & handle IRC messages:
     """
     def __on_message__(self, prefix, command, params):
-        self.__log.debug("Message received: prefix=%s, command=%s, params=%s", prefix, command, params)
+        self.__log.debug("Message received: session=%s, prefix=%s, command=%s, params=%s", self.__session_id, prefix, command, params)
 
         if not self.__client:
             self.__pre_login__(prefix, command, params)
@@ -248,11 +251,11 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
             elif len(params) == 1:
                 q = params[0]
 
-                if q == "+b":
+                if q in ("+b", "b"):
                     self.__send_bans__()
-                elif q == "+e":
+                elif q in ("+e", "e"):
                     self.__send_exceptions__()
-                elif q == "+I":
+                elif q in ("+I", "I"):
                     self.__send_invitations__()
                 else:
                     self.__writeln__(":%s 482 #%s :Cannot change mode over IRC protocol.", self.__config.server_hostname, channel)
@@ -290,7 +293,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
             list_type = "talker"
 
         if list_type:
-            p = ListFromStatus(self.__client.state.group, list_type)
+            p = MembersFromStatus(self.__client.state.group, list_type)
 
             p.on_found = lambda n: self.__writeln__(":%s 346 %s #%s :%s", self.__config.server_hostname, self.__session.nick, self.__client.state.group, n)
             p.on_end = lambda: self.__writeln__(":%s 347 %s #%s :End of INVITATION list", self.__config.server_hostname, self.__session.nick, self.__client.state.group)
@@ -482,6 +485,8 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
                                 self.__process_status_message__(f[0], f[1])
                             elif t == "e":
                                 self.__process_error_message__(f[0])
+                            elif t == "e":
+                                self.__process_wall_message__(f[0])
                             elif t == "i":
                                 self.__process_command_message__(f)
                         except:
@@ -508,6 +513,8 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         self.__writeln__(":%s 221 %s +i", self.__config.server_hostname, self.__session.nick)
 
     def __process_status_message__(self, category, text):
+        self.__writeln__("NOTICE %s :***%s*** %s", self.__session.nick, category, text)
+        
         if category == "Register" and text.startswith("Nick already in use"):
             self.__die__(436, "%s :Nickname collision" % self.__session.nick)
         elif category == "FYI":
@@ -546,16 +553,24 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         except:
             pass
 
-        self.__writeln__(":%s %s %s", self.__config.server_hostname, command, params)
+        if command == "ERROR":
+            self.__writeln__("%s %s", command, params)
+        else:
+            self.__writeln__("%s %s", command, params)
 
-    @staticmethod
     def __map_error_msg__(text):
+        params =  "%s :%s" % (self.__session.nick, text)
+
         if text.startswith("You don't have administrative privileges"):
-            return 481, ":" + text
+            return 481, params
         elif text.startswith("You aren't the moderator"):
-            return 482, ":" + text
-        elif text.startswith("Access denied."):
-            return 465, ":" + text
+            return 482, params
+        elif text.startswith("Access denied"):
+            return 465, params
+
+    def __process_wall_message__(self, fields):
+        if len(fields) >= 2:
+            self.__writeln__("NOTICE %s :***%s*** %s", self.__session.nick, fields[0], fields[1])
 
     def __process_command_message__(self, fields):
         if not self.__client.state.joining and fields[0] == "co":
@@ -631,15 +646,20 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         if not self.__client.state.joining and new != self.__session.nick:
             self.__writeln__(":%s!~%s NICK %s", old, loginid, new)
 
-    def __writeln__(self, fmt, *args):
-        self.__log.debug("=> %s" % fmt % args)
-
-        self.__transport.write((fmt % args).encode("utf-8"))
-        self.__transport.write(bytearray((13, 10)))
-
+    """"
+        helpers:
+    """
     def __die__(self, errcode, params):
         self.__writeln__(":%s %03d %s", self.__config.server_hostname, errcode, params)
         self.__shutdown = True
+        self.__transport.write_eof()
+
+    def __writeln__(self, fmt, *args):
+        if not self.__shutdown:
+            self.__log.debug("[%s] => %s" % (self.__session_id, fmt % args))
+
+            self.__transport.write((fmt % args).encode("utf-8"))
+            self.__transport.write(bytearray((13, 10)))
 
     @staticmethod
     def __map_group_status__(flags):
