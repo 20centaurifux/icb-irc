@@ -325,14 +325,22 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
 
     def __whois_received__(self, params):
         if len(params) > 0:
-            p = FindUser(params[0])
+            if len(params) >= 2 and params[0] != self.__config.server_hostname:
+                self.__writeln__(":%s 402 %s %s :No such server.", self.__config.server_hostname, self.__session.nick, params[0])
+            else:
+                query = params[0]
 
-            p.on_found = self.__send_whois__
-            p.on_not_found = lambda: self.__writeln__(":%s 401 %s %s :No such nick.", self.__config.server_hostname, self.__session.nick, params[0])
+                if len(params) >= 2:
+                    query = params[1]
 
-            self.__handlers.append(p)
+                p = FindUser(query)
 
-            self.__client.command("w")
+                p.on_found = self.__send_whois__
+                p.on_not_found = lambda: self.__writeln__(":%s 401 %s %s :No such nick.", self.__config.server_hostname, self.__session.nick, query)
+
+                self.__handlers.append(p)
+
+                self.__client.command("w")
 
     def __send_whois__(self, is_mod, nick, idle, loginid, host, status):
         self.__writeln__(":%s 311 %s %s %s %s * :%s", self.__config.server_hostname, self.__session.nick, nick, loginid, host, loginid)
