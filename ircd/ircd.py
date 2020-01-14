@@ -389,7 +389,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         if len(params) != 1:
             self.__writeln__(":%s ERROR :You can only join a single channel.", self.__config.server_hostname)
         elif (len(params[0]) < 2 or params[0][0] != "#") or not validate.is_valid_group(params[0][1:]):
-            self.__writeln__("403 %s %s", self.__session.nick, params[0])
+            self.__writeln__(":%s 403 %s %s", self.__config.server_hostname, self.__session.nick, params[0])
         else:
             self.__client.command("g", params[0][1:])
 
@@ -424,6 +424,14 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
 
     def __topic_received__(self, params):
         self.__client.command("topic", params[1])
+
+    def __away_received__(self, params):
+        if len(params) == 1 and params[0]:
+            self.__client.command("away", params[0][:29] + "..." if len(params[0]) > 32 else params[0])
+            self.__writeln__(":%s 306 %s :You have been marked as being away.", self.__config.server_hostname, self.__session.nick)
+        else:
+            self.__client.command("noaway")
+            self.__writeln__(":%s 305 %s :You are no longer marked as being away.", self.__config.server_hostname, self.__session.nick)
 
     def __quit_received__(self, params):
         self.__client.quit()
