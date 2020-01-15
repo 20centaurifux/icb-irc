@@ -83,7 +83,7 @@ class MembersFromStatus(client.StatusParser):
     def end(self):
         self.on_end()
 
-        if self.__found_group == self.__group:
+        if self.__found_group.lower() == self.__group.lower():
             self.stop()
 
 class FindUser(client.ListParser):
@@ -97,7 +97,7 @@ class FindUser(client.ListParser):
         self.on_not_found = lambda: None
 
     def found_user(self, is_mod, nick, idle, loginid, host, status):
-        if nick == self.__nick:
+        if nick.lower() == self.__nick.lower():
             self.__args = (is_mod, nick, idle, loginid, host, status)
 
             self.stop()
@@ -275,7 +275,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
             self.__writeln__(":%s 462 %s mode :Not enough Parameters.", self.__config.server_hostname, self.__session.nick)
 
     def __channel_mode__(self, channel, params):
-        if channel == self.__client.state.group:
+        if channel.lower() == self.__client.state.group.lower():
             if not params:
                 self.__send_channel_mode__()
             elif len(params) == 1:
@@ -386,14 +386,15 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
 
         if "aw" in status:
             text = None
+            key = nick.lower()
 
-            if nick in self.__away_cache:
-                m = self.__away_cache[nick]
+            if key in self.__away_cache:
+                m = self.__away_cache[key]
 
                 if m["timer"].elapsed() <= core.AWAY_CACHE_TIMEOUT:
                     text = m["text"]
                 else:
-                    del self.__away_cache[nick]
+                    del self.__away_cache[key]
 
             if text:
                 self.__end_of_whois__(nick, text)
@@ -414,7 +415,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
             self.__writeln__(":%s 301 %s %s :%s", nick, self.__config.server_hostname, nick, away_message)
 
             if update_cache:
-                self.__away_cache[nick] = {"timer": timer.Timer(), "text": away_message}
+                self.__away_cache[nick.lower()] = {"timer": timer.Timer(), "text": away_message}
 
         self.__writeln__(":%s 318 %s %s: End of WHOIS", self.__config.server_hostname, self.__session.nick, nick)
 
@@ -451,7 +452,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
             e = ltd.Encoder("h")
 
             e.add_field_str("m")
-            e.add_field_str("%s %s" % (receiver, message), append_null=True)
+            e.add_field_str("%s %s" % (receiver, part), append_null=True)
 
             self.__client.send(e.encode())
 
@@ -663,7 +664,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
 
             user_flag = ""
 
-            if nick == self.__client.state.moderator:
+            if self.__client.state.moderator and nick.lower() == self.__client.state.moderator.lower():
                 user_flag = "@"
 
             self.__writeln__(":%s 353 %s %s #%s :%s%s", self.__config.server_hostname, self.__client.state.nick, visiblity, channel, user_flag, nick)
