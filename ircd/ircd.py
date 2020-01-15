@@ -128,6 +128,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         self.__handlers = []
         self.__away_cache = {}
         self.__idle = timer.Timer()
+        self.__message_timer = timer.Timer()
 
         self.__decoder.add_listener(self.__on_message__)
 
@@ -434,10 +435,19 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
             self.__client.command("name", params[0])
 
     def __privmsg_received__(self, params):
-        if params[0].startswith("#"):
-            self.__open_message__(params[1])
-        else:
-            self.__private_message__(params[0], params[1])
+        if len(params) == 2:
+            if self.__message_timer.elapsed() >= core.TIME_BETWEEN_MESSAGES:
+                self.__message_timer.restart()
+
+                if params[0].startswith("#"):
+                    if self.__client.state.group.lower() == params[0][1:].lower():
+                        self.__open_message__(params[1])
+                    else:
+                        self.__writeln__(":%s 442 %s %s :You're not on that channel.", self.__config.server_hostname, self.__session.nick, params[0])
+                else:
+                    self.__private_message__(params[0], params[1])
+            else:
+                self.__log.debug("Time between messages too short.")
 
     def __open_message__(self, message):
         for part in wrap(message, 200):
