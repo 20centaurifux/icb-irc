@@ -127,6 +127,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         self.__shutdown = False
         self.__handlers = []
         self.__away_cache = {}
+        self.__idle = timer.Timer()
 
         self.__decoder.add_listener(self.__on_message__)
 
@@ -136,7 +137,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         self.__log.info("Client connected, session_id=%s, address=%s", self.__session_id, address[0])
         self.__log.debug("ICB endpoint: %s", self.__config.icb_endpoint)
 
-        self.__connections[self.__session_id] = address
+        self.__connections[self.__session_id] = self.__session
         self.__address = address[0]
         self.__transport = transport
 
@@ -145,22 +146,20 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         if cipher:
             self.__log.info("Cipher: %s", cipher)
 
+        loop = asyncio.get_running_loop()
+
+        loop.create_task(self.__test_timeout__())
+
     def data_received(self, data):
         if not self.__shutdown:
             try:
                 self.__decoder.write(data)
+                self.__idle.restart()
 
             except:
                 self.__log.warning(traceback.format_exc())
 
                 self.__transport.close()
-
-    def __abort__(self):
-        self.__log.fatal(traceback.format_exc())
-
-        loop = asyncio.get_running_loop()
-
-        loop.stop()
 
     def connection_lost(self, ex):
         if ex:
@@ -171,6 +170,8 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
     def __shutdown__(self):
         self.__log.info("Closing session: '%s'", self.__session_id)
 
+        self.__shutdown = True
+
         try:
             self.__client.quit()
         except AttributeError:
@@ -180,6 +181,25 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
             del self.__connections[self.__session_id]
 
         self.__transport.abort()
+
+    async def __test_timeout__(self):
+        while not self.__shutdown:
+            elapsed = self.__idle.elapsed()
+
+            if elapsed >= core.CONNECTION_TIMEOUT:
+                self.__log.info("Connection timeout, session=%s", self.__session_id)
+
+                self.__shutdown = True
+
+                self.__transport.close()
+            elif elapsed >= core.PING_TIMEOUT:
+                self.__writeln__(":%s PING :%s", self.__config.server_hostname, self.__config.server_hostname)
+
+                seconds = core.CONNECTION_TIMEOUT - elapsed
+            else:
+                seconds = core.PING_TIMEOUT - elapsed
+
+            await asyncio.sleep(seconds)
 
     """
         receive & handle IRC messages:
@@ -360,7 +380,7 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
             if nick in self.__away_cache:
                 m = self.__away_cache[nick]
 
-                if m["timer"].elapsed() <= 120:
+                if m["timer"].elapsed() <= core.AWAY_CACHE_TIMEOUT:
                     text = m["text"]
                 else:
                     del self.__away_cache[nick]
