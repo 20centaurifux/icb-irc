@@ -45,5 +45,4 @@ GROUP_MIN = 1
 GROUP_MAX = 12
 
 def is_valid_group(group):
-    print(group)
     return has_valid_length(group, GROUP_MIN, GROUP_MAX)

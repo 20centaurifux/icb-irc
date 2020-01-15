@@ -55,4 +55,4 @@ If a group is controlled (C), only invited users are allowed to speak. The +v us
 
 Write a message to "server" if you want to run ICB commands:
 
-	/msg server help ICB
+	/msg server help icb
