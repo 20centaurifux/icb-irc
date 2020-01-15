@@ -22,7 +22,7 @@ This array contains the network bindings (TCP and TLS over TCP).
 	"bindings":
 	[
 		"tcp://localhost:6667",
-		"tcps://localhos:6668t?cert=./runtime/selfsigned.cert&key=./runtime/selfsigned.key"
+		"tcps://localhost:6668?cert=./runtime/selfsigned.cert&key=./runtime/selfsigned.key"
 	]
 
 ## icb
@@ -56,3 +56,7 @@ If a group is controlled (C), only invited users are allowed to speak. The +v us
 Write a message to "server" if you want to run ICB commands:
 
 	/msg server help icb
+
+# Demo
+
+There's a test server running under irc.internetcitizens.band:6667.
