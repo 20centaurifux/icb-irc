@@ -1,7 +1,8 @@
 {
 	"server":
 	{
-		"hostname": "localhost"
+		"hostname": "localhost",
+		"max_clients": 100
 	},
 	"logging":
 	{

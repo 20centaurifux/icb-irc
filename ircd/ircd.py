@@ -135,20 +135,25 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         address = transport.get_extra_info("peername")
 
         self.__log.info("Client connected, session_id=%s, address=%s", self.__session_id, address[0])
-        self.__log.debug("ICB endpoint: %s", self.__config.icb_endpoint)
 
-        self.__connections[self.__session_id] = self.__session
         self.__address = address[0]
         self.__transport = transport
 
-        cipher = transport.get_extra_info("cipher")
+        if len(self.__connections) == self.__config.server_max_clients:
+            self.__log.warning("Connection limit exceeded.")
 
-        if cipher:
-            self.__log.info("Cipher: %s", cipher)
+            self.__transport.close()
+        else:
+            self.__connections[self.__session_id] = self.__session
 
-        loop = asyncio.get_running_loop()
+            cipher = transport.get_extra_info("cipher")
 
-        loop.create_task(self.__test_timeout__())
+            if cipher:
+                self.__log.info("Cipher: %s", cipher)
+
+            loop = asyncio.get_running_loop()
+
+            loop.create_task(self.__test_timeout__())
 
     def data_received(self, data):
         if not self.__shutdown:
@@ -762,6 +767,9 @@ async def run_service(opts):
     logger = log.new_logger("ircd", preferences.logging_verbosity)
 
     logger.info("Starting server process with pid %d.", os.getpid())
+    logger.info("Hostname: %s", preferences.server_hostname)
+    logger.info("Max clients: %d", preferences.server_max_clients)
+    logger.info("ICB endpoint: %s", preferences.icb_endpoint)
 
     if os.name == "posix":
         loop = asyncio.get_event_loop()

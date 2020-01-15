@@ -31,6 +31,7 @@ import core
 @dataclass
 class Config:
     server_hostname: str = "localhost"
+    server_max_clients: int = 100
     bindings: List[str] = field(default_factory=list)
     logging_verbosity: core.Verbosity = core.Verbosity.INFO
     icb_endpoint: str = "tcp://localhost:7326"
