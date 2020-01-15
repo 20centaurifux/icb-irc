@@ -251,6 +251,8 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
 
         try:
             fn = getattr(self, "__%s_received__" % command.lower())
+        except AttributeError:
+            self.__log.debug("Unknown command: %s", command)
         except:
             pass
 
@@ -259,6 +261,9 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
 
     def __ping_received__(self, params):
         self.__writeln__("PONG %s", self.__config.server_hostname)
+
+    def __motd_received__(self, params):
+        self.__send_motd__()
 
     def __mode_received__(self, params):
         if len(params) >= 1:
@@ -533,9 +538,22 @@ class IRCServerProtocol(asyncio.Protocol, client.StateListener):
         self.__writeln__(":%s 001 %s :Welcome to the Internet Relay Network %s.", self.__config.server_hostname, self.__session.nick, self.__session.nick)
         self.__writeln__(":%s 002 %s :Your host is %s, running version v%s.", self.__config.server_hostname, self.__session.nick, self.__config.server_hostname, core.VERSION)
         self.__writeln__(":%s 004 %s :%s v%s oi npstiqC", self.__config.server_hostname, self.__session.nick, core.NAME, core.VERSION)
-        self.__writeln__(":%s 375 %s :Message of the Day", self.__config.server_hostname, self.__session.nick)
-        self.__writeln__(":%s 376 %s :End of MOTD", self.__config.server_hostname, self.__session.nick)
+
+        self.__send_motd__()
+
         self.__writeln__(":%s 221 %s +i", self.__config.server_hostname, self.__session.nick)
+
+    def __send_motd__(self):
+        self.__writeln__(":%s 375 %s :- %s Message of the Day", self.__config.server_hostname, self.__session.nick, self.__config.server_hostname)
+
+        try:
+            with open(self.__config.server_motd) as f:
+                for l in f:
+                    self.__writeln__(":%s 372 %s :- %s", self.__config.server_hostname, self.__session.nick, l)
+        except:
+            pass
+
+        self.__writeln__(":%s 376 %s :End of MOTD", self.__config.server_hostname, self.__session.nick)
 
     def __process_status_message__(self, category, text):
         self.__writeln__("NOTICE %s :***%s*** %s", self.__session.nick, category, text)

@@ -2,7 +2,8 @@
 	"server":
 	{
 		"hostname": "localhost",
-		"max_clients": 100
+		"max_clients": 100,
+		"motd": "./data/motd"
 	},
 	"logging":
 	{
