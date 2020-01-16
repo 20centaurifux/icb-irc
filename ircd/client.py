@@ -27,6 +27,7 @@ import asyncio
 import ltd
 import re
 from enum import Enum
+import core
 
 class ICBClientProtocol(asyncio.Protocol):
     def __init__(self, on_conn_lost, queue):
@@ -200,6 +201,7 @@ class Client:
         self.__host = host
         self.__port = port
         self.__queue = asyncio.Queue()
+        self.__messages = asyncio.Queue()
         self.__transport = None
         self.__state = State()
 
@@ -215,6 +217,8 @@ class Client:
         self.__transport, _ = await loop.create_connection(lambda: ICBClientProtocol(on_conn_lost, self.__queue),
                                                            self.__host,
                                                            self.__port)
+
+        loop.create_task(self.__send_messages__())
 
         return on_conn_lost
 
@@ -233,8 +237,21 @@ class Client:
 
         self.__state.nick = nick
 
+    async def __send_messages__(self):
+        while not self.__transport.is_closing():
+            try:
+                msg = await asyncio.wait_for(self.__messages.get(), timeout=30)
+
+                self.__transport.write(msg)
+
+                await asyncio.sleep(core.THROTTLE)
+
+            except asyncio.TimeoutError:
+                pass
+
     def __write__(self, msg):
-        self.__transport.write(msg)
+        if not self.__transport.is_closing():
+            self.__messages.put_nowait(msg)
 
     def send(self, msg):
         self.__write__(msg)
